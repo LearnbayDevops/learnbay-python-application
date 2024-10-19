@@ -1,0 +1,72 @@
+---
+- name: Deploy Flask App to EKS
+  hosts: ec2
+  become: yes
+  vars:
+    git_repo: "https://github.com/yourusername/your-repo.git"  # Replace with your Git repository URL
+    ecr_repository: "your_ecr_repo_name"  # Replace with your ECR repository name
+    region: "ap-south-1"  # Change to your AWS region
+
+  tasks:
+    - name: Install required packages
+      apt:
+        name:
+          - git
+          - docker.io
+          - python3-pip
+        state: present
+        update_cache: yes
+
+    - name: Install AWS CLI
+      pip:
+        name: awscli
+        state: present
+
+    - name: Clone the Git repository
+      git:
+        repo: "{{ git_repo }}"
+        dest: /home/ubuntu/flask-app  # Destination directory for the clone
+        update: yes
+
+    - name: Build Docker image
+      docker_image:
+        path: /home/ubuntu/flask-app
+        name: "{{ ecr_repository }}"
+        tag: latest
+        state: present
+
+    - name: Login to ECR
+      shell: $(aws ecr get-login --no-include-email --region {{ region }})
+      register: ecr_login
+
+    - name: Tag Docker image for ECR
+      command: docker tag {{ ecr_repository }}:latest {{ account_id }}.dkr.ecr.{{ region }}.amazonaws.com/{{ ecr_repository }}:latest
+
+    - name: Push Docker image to ECR
+      command: docker push {{ account_id }}.dkr.ecr.{{ region }}.amazonaws.com/{{ ecr_repository }}:latest
+
+    - name: Deploy to EKS
+      kubernetes:
+        name: learnbay-flask-app
+        namespace: default
+        definition: 
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: learnbay-flask-app
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                app: learnbay-flask-app
+            template:
+              metadata:
+                labels:
+                  app: learnbay-flask-app
+              spec:
+                containers:
+                - name: learnbay-flask-app
+                  image: "{{ account_id }}.dkr.ecr.{{ region }}.amazonaws.com/{{ ecr_repository }}:latest"
+                  ports:
+                  - containerPort: 5000
+
