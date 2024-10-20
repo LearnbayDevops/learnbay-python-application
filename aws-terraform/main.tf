@@ -1,4 +1,4 @@
-# Define the provider as AWS and set region to ap-south-1 (Mumbai)
+# Define the provider as AWS and set the region to ap-south-1 (Mumbai)
 provider "aws" {
   region = "ap-south-1"  # Mumbai Region
 }
@@ -11,7 +11,7 @@ resource "aws_vpc" "practice_vpc" {
   }
 }
 
-# Create an Internet Gateway to allow external traffic
+# Create an Internet Gateway
 resource "aws_internet_gateway" "igw" {
   vpc_id = aws_vpc.practice_vpc.id
   tags = {
@@ -19,18 +19,28 @@ resource "aws_internet_gateway" "igw" {
   }
 }
 
-# Create a public subnet
-resource "aws_subnet" "public_subnet" {
-  vpc_id     = aws_vpc.practice_vpc.id
-  cidr_block = "10.0.1.0/24"
-  map_public_ip_on_launch = true  # Enable public IP
-  availability_zone = "ap-south-1a"
+# Create two public subnets in different availability zones with non-overlapping CIDR blocks
+resource "aws_subnet" "public_subnet_a" {
+  vpc_id                  = aws_vpc.practice_vpc.id
+  cidr_block              = "10.0.1.0/24"  # First public subnet
+  map_public_ip_on_launch = true
+  availability_zone       = "ap-south-1a"
   tags = {
-    Name = "public-subnet"
+    Name = "public-subnet-a"
   }
 }
 
-# Create a route table for the public subnet
+resource "aws_subnet" "public_subnet_b" {
+  vpc_id                  = aws_vpc.practice_vpc.id
+  cidr_block              = "10.0.2.0/24"  # Second public subnet
+  map_public_ip_on_launch = true
+  availability_zone       = "ap-south-1b"
+  tags = {
+    Name = "public-subnet-b"
+  }
+}
+
+# Create a route table for the public subnets
 resource "aws_route_table" "public_route_table" {
   vpc_id = aws_vpc.practice_vpc.id
 
@@ -44,9 +54,14 @@ resource "aws_route_table" "public_route_table" {
   }
 }
 
-# Associate the route table with the public subnet
-resource "aws_route_table_association" "public_route_table_association" {
-  subnet_id      = aws_subnet.public_subnet.id
+# Associate the route table with the public subnets
+resource "aws_route_table_association" "public_route_table_association_a" {
+  subnet_id      = aws_subnet.public_subnet_a.id
+  route_table_id = aws_route_table.public_route_table.id
+}
+
+resource "aws_route_table_association" "public_route_table_association_b" {
+  subnet_id      = aws_subnet.public_subnet_b.id
   route_table_id = aws_route_table.public_route_table.id
 }
 
@@ -57,7 +72,7 @@ resource "aws_security_group" "allow_ssh_http" {
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
-    cidr_blocks = ["122.179.199.115/32"]
+    cidr_blocks = ["223.177.182.37/32"]
   }
   egress {
     from_port   = 0
@@ -74,15 +89,12 @@ resource "aws_security_group" "allow_ssh_http" {
 # Define an EC2 instance
 resource "aws_instance" "ubuntu_instance" {
   ami = "ami-0dee22c13ea7a9a67"  # Ubuntu 22.04 LTS AMI in ap-south-1 (Mumbai)
-  instance_type = "t2.micro"      # Free tier eligible instance type
+  instance_type = "t2.micro"
 
-  # Use the public subnet
-  subnet_id = aws_subnet.public_subnet.id
+  subnet_id = aws_subnet.public_subnet_a.id  # Use one of the public subnets
 
-  # Attach the security group to the instance
   security_groups = [aws_security_group.allow_ssh_http.id]
 
-  # Use a GP3 volume with 8GB for the root volume
   root_block_device {
     volume_type = "gp3"
     volume_size = 8
@@ -92,36 +104,12 @@ resource "aws_instance" "ubuntu_instance" {
     Name = "practice-ec2"
   }
 
-  # Ensure the instance starts with a public IP
   associate_public_ip_address = true
 }
 
-# Create ECR repository for the Python application
-resource "aws_ecr_repository" "learnbay_python_app" {
-  name = "learnbay-python-application"
-  
-  tags = {
-    Name = "learnbay-python-application"
-  }
-}
-
-# Create EKS Cluster
-resource "aws_eks_cluster" "learnbay_cluster" {
-  name     = "learnbay-cluster"
-  role_arn = aws_iam_role.eks_cluster_role.arn
-  version  = "1.21"
-
-  vpc_config {
-    subnet_ids = [aws_subnet.public_subnet.id]
-    endpoint_public_access = true
-  }
-
-  depends_on = [aws_internet_gateway.igw]
-}
-
-# Create IAM Role for EKS Cluster
-resource "aws_iam_role" "eks_cluster_role" {
-  name = "learnbay-eks-cluster-role"
+# Create an IAM role for EKS
+resource "aws_iam_role" "eks_role" {
+  name = "eks_role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -137,10 +125,30 @@ resource "aws_iam_role" "eks_cluster_role" {
   })
 }
 
-# Attach policies to the EKS Cluster role
-resource "aws_iam_role_policy_attachment" "eks_cluster_policy" {
+# Attach EKS policies to the role
+resource "aws_iam_role_policy_attachment" "eks_role_policy_AmazonEKSClusterPolicy" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
-  role       = aws_iam_role.eks_cluster_role.name
+  role       = aws_iam_role.eks_role.name
+}
+
+resource "aws_iam_role_policy_attachment" "eks_role_policy_AmazonEKSServicePolicy" {
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSServicePolicy"
+  role       = aws_iam_role.eks_role.name
+}
+
+# Create EKS cluster
+resource "aws_eks_cluster" "learnbay_cluster" {
+  name     = "learnbay-cluster"
+  role_arn = aws_iam_role.eks_role.arn
+
+  vpc_config {
+    subnet_ids = [
+      aws_subnet.public_subnet_a.id,
+      aws_subnet.public_subnet_b.id,
+    ]
+  }
+
+  depends_on = [aws_internet_gateway.igw]
 }
 
 # Create Node Group for EKS
@@ -148,7 +156,7 @@ resource "aws_eks_node_group" "learnbay_node_group" {
   cluster_name    = aws_eks_cluster.learnbay_cluster.name
   node_group_name = "learnbay-node-group"
   node_role_arn   = aws_iam_role.eks_node_role.arn
-  subnet_ids      = [aws_subnet.public_subnet.id]
+  subnet_ids      = [aws_subnet.public_subnet_a.id,aws_subnet.public_subnet_b.id]
   scaling_config {
     desired_size = 1
     max_size     = 1
@@ -192,7 +200,17 @@ resource "aws_iam_role_policy_attachment" "eks_registries_policy" {
   role       = aws_iam_role.eks_node_role.name
 }
 
-# Output the public IP of the instance and ECR URI
+
+# Create ECR repository for the Python application
+resource "aws_ecr_repository" "learnbay_python_app" {
+  name = "learnbay-python-application"
+  
+  tags = {
+    Name = "learnbay-python-application"
+  }
+}
+
+# Output the public IP of the instance
 output "instance_public_ip" {
   value = aws_instance.ubuntu_instance.public_ip
 }

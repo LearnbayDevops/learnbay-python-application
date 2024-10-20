@@ -1,0 +1,52 @@
+---
+- name: Grant root user or IAM role access to EKS cluster
+  hosts: localhost
+  gather_facts: no
+  vars:
+    eks_cluster_name: "learnbay-cluster"
+    aws_region: "ap-south-1"
+    root_arn: "arn:aws:iam::025066281370:user/root"  # Update with your root user ARN
+
+  tasks:
+
+    - name: Update kubeconfig to access EKS cluster
+      shell: >
+        aws eks update-kubeconfig --name {{ eks_cluster_name }} --region {{ aws_region }}
+      environment:
+        AWS_ACCESS_KEY_ID: "{{ lookup('env', 'AWS_ACCESS_KEY_ID') }}"
+        AWS_SECRET_ACCESS_KEY: "{{ lookup('env', 'AWS_SECRET_ACCESS_KEY') }}"
+      register: kubeconfig
+      ignore_errors: yes
+
+    - name: Get aws-auth ConfigMap from EKS cluster
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: ConfigMap
+        namespace: kube-system
+        name: aws-auth
+      register: aws_auth_config
+
+    - name: Update aws-auth ConfigMap to grant root user access
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: aws-auth
+            namespace: kube-system
+          data:
+            mapRoles: |
+              {{ aws_auth_config.resources[0].data.mapRoles | default('') }}
+            mapUsers: |
+              {{ aws_auth_config.resources[0].data.mapUsers | default('') }}
+              - userarn: "{{ root_arn }}"
+                username: "Learnbay_DevOps"
+                groups:
+                  - system:masters
+      when: aws_auth_config is not failed
+  vars:
+      ansible_python_interpreter: /usr/bin/python3  # Specify the correct Python interpreter
+      eks_cluster_name: "learnbay-cluster"
+      aws_region: "ap-south-1"
+      root_arn: "arn:aws:iam::025066281370:user/root"
