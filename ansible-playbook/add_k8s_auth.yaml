@@ -50,3 +50,4 @@
       eks_cluster_name: "learnbay-cluster"
       aws_region: "ap-south-1"
       root_arn: "arn:aws:iam::025066281370:user/root"
+      ansible_python_interpreter: /usr/bin/python3

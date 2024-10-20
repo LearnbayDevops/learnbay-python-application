@@ -2,10 +2,6 @@
 - name: Deploy Flask App to EKS
   hosts: ec2
   become: yes
-  vars:
-    git_repo: "https://github.com/yourusername/your-repo.git"  # Replace with your Git repository URL
-    ecr_repository: "your_ecr_repo_name"  # Replace with your ECR repository name
-    region: "ap-south-1"  # Change to your AWS region
 
   tasks:
     - name: Install required packages
@@ -17,10 +13,24 @@
         state: present
         update_cache: yes
 
-    - name: Install AWS CLI
-      pip:
-        name: awscli
-        state: present
+    - name: Install AWS CLI using Snap
+      command: sudo snap install aws-cli --classic
+
+    - name: Ensure .aws directory exists
+      file:
+        path: "{{ ansible_env.HOME }}/.aws"
+        state: directory
+        mode: '0700'  # Set permissions for the directory
+      become: yes
+
+    - name: Set AWS Credentials
+      become: yes  # to assume sudo role
+      shell: |
+        echo "[default]" >> ~/.aws/credentials
+        echo "aws_access_key_id={{ aws_access_key }}" >> ~/.aws/credentials
+        echo "aws_secret_access_key={{ aws_secret_key }}" >> ~/.aws/credentials
+      args:
+        creates: ~/.aws/credentials
 
     - name: Clone the Git repository
       git:
@@ -30,14 +40,17 @@
 
     - name: Build Docker image
       docker_image:
-        path: /home/ubuntu/flask-app
         name: "{{ ecr_repository }}"
-        tag: latest
         state: present
+        source: build
+        build:
+          path: /home/ubuntu/flask-app/python-flask-app
 
     - name: Login to ECR
-      shell: $(aws ecr get-login --no-include-email --region {{ region }})
+      shell: |
+        aws ecr get-login-password --region {{ region }} | docker login --username AWS --password-stdin {{ account_id }}.dkr.ecr.{{ region }}.amazonaws.com
       register: ecr_login
+      failed_when: ecr_login.rc != 0
 
     - name: Tag Docker image for ECR
       command: docker tag {{ ecr_repository }}:latest {{ account_id }}.dkr.ecr.{{ region }}.amazonaws.com/{{ ecr_repository }}:latest
@@ -45,15 +58,27 @@
     - name: Push Docker image to ECR
       command: docker push {{ account_id }}.dkr.ecr.{{ region }}.amazonaws.com/{{ ecr_repository }}:latest
 
+    - name: Install kubernetes python package
+      command: sudo apt install python3-kubernetes
+
+    - name: Update kubeconfig to access EKS cluster
+      shell: >
+        aws eks update-kubeconfig --name {{ eks_cluster_name }} --region {{ region }}
+      environment:
+        AWS_ACCESS_KEY_ID: "{{ aws_access_key }}"
+        AWS_SECRET_ACCESS_KEY: "{{ aws_secret_key }}"
+      register: kubeconfig
+      ignore_errors: yes
+
     - name: Deploy to EKS
-      kubernetes:
-        name: learnbay-flask-app
-        namespace: default
-        definition: 
+      kubernetes.core.k8s:
+        state: present
+        definition:
           apiVersion: apps/v1
           kind: Deployment
           metadata:
             name: learnbay-flask-app
+            namespace: default
           spec:
             replicas: 1
             selector:
@@ -69,4 +94,14 @@
                   image: "{{ account_id }}.dkr.ecr.{{ region }}.amazonaws.com/{{ ecr_repository }}:latest"
                   ports:
                   - containerPort: 5000
-
+  vars:
+    git_repo: "https://github.com/LearnbayDevops/learnbay-python-application.git"  # Replace with your Git repository URL
+    ecr_repository: "learnbay-python-application"  # Replace with your ECR repository name
+    region: "ap-south-1"  # Change to your AWS region
+    account_id: "025066281370"
+    # Add your AWS IAM Creds below
+    aws_access_key: ""
+    aws_secret_key: ""
+    eks_cluster_name: "learnbay-cluster"
+  collections:
+    - kubernetes.core

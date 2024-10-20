@@ -94,6 +94,9 @@ resource "aws_instance" "ubuntu_instance" {
   subnet_id = aws_subnet.public_subnet_a.id  # Use one of the public subnets
 
   security_groups = [aws_security_group.allow_ssh_http.id]
+  
+  # Reference the existing key pair on AWS
+  key_name = "server-001-key"  # Existing key pair on AWS
 
   root_block_device {
     volume_type = "gp3"
