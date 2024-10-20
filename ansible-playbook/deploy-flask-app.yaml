@@ -3,8 +3,8 @@
   hosts: ec2
   become: yes
   vars:
-    git_repo: "https://github.com/yourusername/your-repo.git"  # Replace with your Git repository URL
-    ecr_repository: "your_ecr_repo_name"  # Replace with your ECR repository name
+    git_repo: "https://github.com/LearnbayDevops/learnbay-python-application.git"  # Replace with your Git repository URL
+    ecr_repository: "learnbay-python-application"  # Replace with your ECR repository name
     region: "ap-south-1"  # Change to your AWS region
 
   tasks:
@@ -17,11 +17,6 @@
         state: present
         update_cache: yes
 
-    - name: Install AWS CLI
-      pip:
-        name: awscli
-        state: present
-
     - name: Clone the Git repository
       git:
         repo: "{{ git_repo }}"
@@ -30,10 +25,11 @@
 
     - name: Build Docker image
       docker_image:
-        path: /home/ubuntu/flask-app
         name: "{{ ecr_repository }}"
-        tag: latest
         state: present
+        source: build
+        build:
+          path: /home/ubuntu/flask-app/python-flask-app
 
     - name: Login to ECR
       shell: $(aws ecr get-login --no-include-email --region {{ region }})
@@ -46,14 +42,14 @@
       command: docker push {{ account_id }}.dkr.ecr.{{ region }}.amazonaws.com/{{ ecr_repository }}:latest
 
     - name: Deploy to EKS
-      kubernetes:
-        name: learnbay-flask-app
-        namespace: default
-        definition: 
+      kubernetes.core.k8s:
+        state: present
+        definition:
           apiVersion: apps/v1
           kind: Deployment
           metadata:
             name: learnbay-flask-app
+            namespace: default
           spec:
             replicas: 1
             selector:
@@ -69,4 +65,10 @@
                   image: "{{ account_id }}.dkr.ecr.{{ region }}.amazonaws.com/{{ ecr_repository }}:latest"
                   ports:
                   - containerPort: 5000
-
+  vars:
+    git_repo: "https://github.com/LearnbayDevops/learnbay-python-application.git"  # Replace with your Git repository URL
+    ecr_repository: "learnbay-python-application"  # Replace with your ECR repository name
+    region: "ap-south-1"  # Change to your AWS region
+    account_id: "025066281370"
+  collections:
+    - kubernetes.core
