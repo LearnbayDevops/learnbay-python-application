@@ -2,13 +2,6 @@
 - name: Deploy Flask App to EKS
   hosts: ec2
   become: yes
-<<<<<<< HEAD
-=======
-  vars:
-    git_repo: "https://github.com/LearnbayDevops/learnbay-python-application.git"  # Replace with your Git repository URL
-    ecr_repository: "learnbay-python-application"  # Replace with your ECR repository name
-    region: "ap-south-1"  # Change to your AWS region
->>>>>>> refs/remotes/origin/main
 
   tasks:
     - name: Install required packages
