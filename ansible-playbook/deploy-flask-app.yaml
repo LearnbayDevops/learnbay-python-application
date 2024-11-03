@@ -100,8 +100,8 @@
     region: "ap-south-1"  # Change to your AWS region
     account_id: "025066281370"
     # Add your AWS IAM Creds below
-    aws_access_key: ""
-    aws_secret_key: ""
+    aws_access_key: "{{aws_access_key}}"
+    aws_secret_key: "{{aws_secret_key}}"
     eks_cluster_name: "learnbay-cluster"
   collections:
     - kubernetes.core
